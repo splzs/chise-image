@@ -1,0 +1,12 @@
+{
+  "functions": {
+    "api/config.js": {
+      "runtime": "@vercel/node",
+      "maxDuration": 10
+    },
+    "api/generate.js": {
+      "runtime": "@vercel/node",
+      "maxDuration": 60
+    }
+  }
+}

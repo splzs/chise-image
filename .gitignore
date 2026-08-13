@@ -1,0 +1,7 @@
+auth.json
+config.json
+server.out.log
+server.err.log
+node_modules/
+
+.vercel

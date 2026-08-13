@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>起势生图</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-copy">
+            <h1>起势生图</h1>
+            <p>参考图、提示词、多轮修改</p>
+          </div>
+        </div>
+        <div class="status-pill" id="statusPill">检查中</div>
+      </header>
+
+      <main class="layout">
+        <section class="panel composer-panel">
+          <label class="prompt-field" for="prompt">
+            <span class="field-label">提示词</span>
+            <textarea
+              id="prompt"
+              rows="7"
+              placeholder="描述你想生成或修改的画面"
+            ></textarea>
+          </label>
+
+          <section class="reference-panel" aria-label="参考图">
+            <div class="section-head">
+              <span class="field-label">参考图</span>
+              <button id="clearBtn" class="text-button" type="button">清空</button>
+            </div>
+
+            <div class="reference-actions">
+              <label class="soft-button upload-button">
+                <input id="refs" type="file" accept="image/*" multiple />
+                选择图片
+              </label>
+              <button id="pasteBtn" class="soft-button" type="button">粘贴图片</button>
+            </div>
+
+            <div
+              id="pastePanel"
+              class="paste-zone"
+              tabindex="0"
+              aria-label="粘贴参考图"
+            >
+              点击这里后按 Ctrl+V，或直接拖入图片
+            </div>
+
+            <div id="editSourceBanner" class="edit-banner hidden">
+              <span>下一次会基于当前结果继续修改</span>
+              <button id="cancelEditSourceBtn" class="text-button" type="button">取消</button>
+            </div>
+
+            <div id="refStrip" class="ref-strip" aria-live="polite"></div>
+          </section>
+
+          <section class="settings-grid" aria-label="生成设置">
+            <label class="compact-field">
+              <span class="field-label">尺寸</span>
+              <select id="sizePreset">
+                <option value="1024x1024">1024 × 1024</option>
+                <option value="1536x1024">1536 × 1024</option>
+                <option value="1024x1536">1024 × 1536</option>
+                <option value="1792x1024">1792 × 1024</option>
+                <option value="1024x1792">1024 × 1792</option>
+              </select>
+            </label>
+
+            <label class="compact-field">
+              <span class="field-label">质量</span>
+              <select id="quality">
+                <option value="auto">自动</option>
+                <option value="high">高</option>
+                <option value="medium">中</option>
+                <option value="low">低</option>
+              </select>
+            </label>
+
+            <label class="compact-field">
+              <span class="field-label">格式</span>
+              <select id="format">
+                <option value="png">PNG</option>
+                <option value="webp">WEBP</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+            </label>
+          </section>
+
+          <input id="model" type="hidden" value="gpt-image-2" />
+          <input id="width" type="hidden" value="1024" />
+          <input id="height" type="hidden" value="1024" />
+
+          <button id="generateBtn" class="primary-button" type="button">生成图片</button>
+        </section>
+
+        <section class="content-stack">
+          <section class="panel preview-panel">
+            <div class="section-head">
+              <span class="section-title">结果</span>
+              <div class="preview-actions">
+                <button id="continueEditBtn" class="text-button hidden" type="button">继续修改</button>
+                <button id="downloadBtn" class="text-button hidden" type="button">下载</button>
+              </div>
+            </div>
+
+            <div id="emptyState" class="empty-state">
+              <div class="empty-art" aria-hidden="true"></div>
+              <p>生成结果会显示在这里</p>
+            </div>
+
+            <figure id="resultFigure" class="result-card hidden">
+              <img id="resultImage" alt="生成结果" />
+              <figcaption>
+                <strong id="resultTitle">生成完成</strong>
+                <p id="resultMeta"></p>
+              </figcaption>
+            </figure>
+
+            <div id="errorBox" class="error-box hidden" role="alert"></div>
+          </section>
+
+          <section class="panel history-panel">
+            <div class="section-head">
+              <span class="section-title">历史</span>
+              <button id="clearHistoryBtn" class="text-button hidden" type="button">清空</button>
+            </div>
+
+            <div id="historyEmpty" class="history-empty">
+              <p>会保存最近生成结果和提示词</p>
+            </div>
+
+            <div id="historyList" class="history-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
