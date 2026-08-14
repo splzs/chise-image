@@ -17,7 +17,7 @@
 
 ```json
 {
-  "base_url": "https://lave8.com/v1",
+  "base_url": "",
   "image_model": "gpt-image-2"
 }
 ```
@@ -43,22 +43,3 @@ npm start
 ```text
 http://localhost:3000
 ```
-
-## 安全说明
-
-- `auth.json` 和 `config.json` 已经放进 `.vercelignore`，不会跟着部署上传。
-- 部署时请把密钥填到平台环境变量里，不要写进前端代码。
-- 浏览器只会请求你自己的 `/api/generate`，不会直接拿到服务端密钥。
-
-## 免费部署
-
-当前项目已经按 Vercel 的免费方案做了部署结构：
-
-- 静态页面：`public/`
-- 服务端接口：`api/config.js`、`api/generate.js`
-
-部署时只需要配置环境变量：
-
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL=https://lave8.com/v1`
-- `IMAGE_MODEL=gpt-image-2`
