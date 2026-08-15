@@ -3,9 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  createClearSessionCookie,
   createConfigPayload,
+  createSessionCookie,
   generateImageFromFormData,
   parseLooseConfig,
+  publicSessionPayload,
+  readSessionFromHeaders,
 } from "./api/_shared.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,9 +59,27 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function sendJsonWithCookie(res, statusCode, payload, cookie) {
+  res.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "set-cookie": cookie,
+  });
+  res.end(JSON.stringify(payload));
+}
+
 function sendText(res, statusCode, text, contentType = "text/plain; charset=utf-8") {
   res.writeHead(statusCode, { "content-type": contentType });
   res.end(text);
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  if (!raw.trim()) return {};
+  return JSON.parse(raw);
 }
 
 async function serveStatic(req, res) {
@@ -87,7 +109,46 @@ async function serveStatic(req, res) {
 
 const server = http.createServer(async (req, res) => {
   if (req.url === "/api/config" && req.method === "GET") {
-    sendJson(res, 200, createConfigPayload(state.config, state.auth));
+    const session = readSessionFromHeaders(req.headers);
+    const auth = session?.apiKey ? { OPENAI_API_KEY: session.apiKey } : state.auth;
+    sendJson(res, 200, createConfigPayload(state.config, auth));
+    return;
+  }
+
+  if (req.url === "/api/session" && req.method === "GET") {
+    const session = readSessionFromHeaders(req.headers);
+    sendJson(res, 200, {
+      ok: true,
+      session: publicSessionPayload(session),
+    });
+    return;
+  }
+
+  if (req.url === "/api/session" && req.method === "POST") {
+    try {
+      const body = await readJsonBody(req);
+      const { cookie, session } = createSessionCookie({
+        baseUrl: body.OPENAI_BASE_URL || body.baseUrl,
+        apiKey: body.OPENAI_API_KEY || body.apiKey,
+      });
+      sendJsonWithCookie(res, 200, {
+        ok: true,
+        session,
+      }, cookie);
+    } catch (error) {
+      sendJson(res, 400, {
+        ok: false,
+        error: error?.message || "Invalid session settings.",
+      });
+    }
+    return;
+  }
+
+  if (req.url === "/api/session" && req.method === "DELETE") {
+    sendJsonWithCookie(res, 200, {
+      ok: true,
+      session: publicSessionPayload(null),
+    }, createClearSessionCookie());
     return;
   }
 
@@ -100,9 +161,11 @@ const server = http.createServer(async (req, res) => {
         duplex: "half",
       });
       const formData = await request.formData();
+      const session = readSessionFromHeaders(req.headers);
       const result = await generateImageFromFormData(formData, {
         config: state.config,
         auth: state.auth,
+        session,
       });
       sendJson(res, result.status, result.body);
     } catch (error) {

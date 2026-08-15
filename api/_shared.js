@@ -1,3 +1,8 @@
+import crypto from "node:crypto";
+
+export const SESSION_COOKIE_NAME = "qishi_image_session";
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 90;
+
 export function parseLooseConfig(rawText) {
   if (!rawText || typeof rawText !== "string") return {};
 
@@ -43,6 +48,159 @@ export function parseLooseConfig(rawText) {
   }
 
   return result;
+}
+
+function normalizeBaseUrl(value) {
+  const text = String(value || "").trim().replace(/\/+$/, "");
+  if (!text) return "";
+
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw new Error("OPENAI_BASE_URL must be a valid URL.");
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("OPENAI_BASE_URL must start with http:// or https://.");
+  }
+
+  return text;
+}
+
+function normalizeCredentials({ baseUrl, apiKey }) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  const normalizedApiKey = String(apiKey || "").trim();
+
+  if (!normalizedBaseUrl) {
+    throw new Error("OPENAI_BASE_URL is required.");
+  }
+  if (!normalizedApiKey) {
+    throw new Error("OPENAI_API_KEY is required.");
+  }
+
+  return {
+    baseUrl: normalizedBaseUrl,
+    apiKey: normalizedApiKey,
+  };
+}
+
+function getSessionSecret(env = process.env) {
+  return (
+    env.SESSION_SECRET ||
+    env.OPENAI_SESSION_SECRET ||
+    env.OPENAI_API_KEY ||
+    "qishi-image-local-session-secret"
+  );
+}
+
+function getSessionKey(env = process.env) {
+  return crypto.createHash("sha256").update(getSessionSecret(env)).digest();
+}
+
+function toBase64Url(buffer) {
+  return Buffer.from(buffer)
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/g, "");
+}
+
+function fromBase64Url(value) {
+  const base64 = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
+  return Buffer.from(base64, "base64");
+}
+
+function getHeader(headers, name) {
+  if (!headers) return "";
+  if (typeof headers.get === "function") return headers.get(name) || "";
+  return headers[name] || headers[name.toLowerCase()] || "";
+}
+
+export function parseCookies(cookieHeader = "") {
+  const cookies = {};
+  for (const part of String(cookieHeader).split(";")) {
+    const index = part.indexOf("=");
+    if (index < 0) continue;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (key) cookies[key] = decodeURIComponent(value);
+  }
+  return cookies;
+}
+
+export function createSessionCookie(credentials, env = process.env) {
+  const normalized = normalizeCredentials(credentials);
+  const payload = {
+    baseUrl: normalized.baseUrl,
+    apiKey: normalized.apiKey,
+    expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
+  };
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", getSessionKey(env), iv);
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(payload), "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  const token = `${toBase64Url(iv)}.${toBase64Url(tag)}.${toBase64Url(encrypted)}`;
+  const secure = env.COOKIE_SECURE === "true" ? "; Secure" : "";
+
+  return {
+    cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Max-Age=${SESSION_MAX_AGE_SECONDS}; Path=/; HttpOnly; SameSite=Lax${secure}`,
+    session: {
+      baseUrl: payload.baseUrl,
+      expiresAt: payload.expiresAt,
+    },
+  };
+}
+
+export function createClearSessionCookie() {
+  return `${SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`;
+}
+
+export function readSessionFromHeaders(headers, env = process.env) {
+  const cookieHeader = getHeader(headers, "cookie");
+  const token = parseCookies(cookieHeader)[SESSION_COOKIE_NAME];
+  if (!token) return null;
+
+  try {
+    const [ivRaw, tagRaw, encryptedRaw] = token.split(".");
+    if (!ivRaw || !tagRaw || !encryptedRaw) return null;
+
+    const decipher = crypto.createDecipheriv("aes-256-gcm", getSessionKey(env), fromBase64Url(ivRaw));
+    decipher.setAuthTag(fromBase64Url(tagRaw));
+    const decrypted = Buffer.concat([
+      decipher.update(fromBase64Url(encryptedRaw)),
+      decipher.final(),
+    ]);
+    const session = JSON.parse(decrypted.toString("utf8"));
+
+    if (!session?.apiKey || !session?.baseUrl || Number(session.expiresAt) < Date.now()) {
+      return null;
+    }
+
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+export function publicSessionPayload(session) {
+  if (!session) {
+    return {
+      authenticated: false,
+      baseUrl: "",
+      expiresAt: null,
+    };
+  }
+
+  return {
+    authenticated: true,
+    baseUrl: session.baseUrl,
+    expiresAt: session.expiresAt,
+  };
 }
 
 export function getConfiguredBaseUrl(config = {}, env = process.env) {
@@ -118,8 +276,8 @@ function toImageResult(data) {
   };
 }
 
-export async function generateImageFromFormData(formData, { config = {}, auth = {}, env = process.env } = {}) {
-  const apiKey = getApiKey(auth, env);
+export async function generateImageFromFormData(formData, { config = {}, auth = {}, session = null, env = process.env } = {}) {
+  const apiKey = session?.apiKey || getApiKey(auth, env);
   if (!apiKey) {
     return { status: 400, body: { ok: false, error: "Missing OPENAI_API_KEY." } };
   }
@@ -150,7 +308,7 @@ export async function generateImageFromFormData(formData, { config = {}, auth = 
   }
 
   const endpoint = referenceFiles.length ? "images/edits" : "images/generations";
-  const baseUrl = getConfiguredBaseUrl(config, env);
+  const baseUrl = session?.baseUrl || getConfiguredBaseUrl(config, env);
   let response;
 
   if (referenceFiles.length) {

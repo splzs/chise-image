@@ -1,9 +1,13 @@
-import { generateImageFromFormData } from "./_shared.js";
+import {
+  generateImageFromFormData,
+  readSessionFromHeaders,
+} from "./_shared.js";
 
 export default async function handler(req, res) {
   try {
     const formData = await req.formData();
-    const result = await generateImageFromFormData(formData);
+    const session = readSessionFromHeaders(req.headers);
+    const result = await generateImageFromFormData(formData, { session });
     res.setHeader("content-type", "application/json; charset=utf-8");
     res.statusCode = result.status;
     res.end(JSON.stringify(result.body));

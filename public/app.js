@@ -4,6 +4,34 @@ const HISTORY_DB_NAME = "qishi-image-history";
 const HISTORY_STORE_NAME = "entries";
 const HISTORY_LIMIT = 24;
 
+const ACADEMIC_PRESETS = [
+  {
+    name: "Nature 图形摘要",
+    prompt:
+      "Generate a clean Nature-style graphical abstract, white background, precise scientific illustration, balanced composition, labeled modules, publication-ready, high clarity.",
+  },
+  {
+    name: "机制示意图",
+    prompt:
+      "Create a mechanism diagram for a biomedical research paper, minimal vector-like style, clear arrows, subtle colors, accurate molecular/cellular process, high-resolution academic figure.",
+  },
+  {
+    name: "实验流程图",
+    prompt:
+      "Design an experimental workflow figure, left-to-right timeline, neat icons, concise labels, journal-ready layout, consistent line weight, white background.",
+  },
+  {
+    name: "论文封面风",
+    prompt:
+      "Create a high-impact journal cover image, elegant scientific concept art, realistic lighting, refined composition, strong central subject, no text, premium academic visual style.",
+  },
+  {
+    name: "材料结构",
+    prompt:
+      "Render a scientific material structure visualization, clean 3D molecular or nanoscale composition, depth, soft studio lighting, white background, publication-grade clarity.",
+  },
+];
+
 const state = {
   files: [],
   refUrls: [],
@@ -11,6 +39,7 @@ const state = {
   downloadUrl: "",
   currentResult: null,
   editSource: null,
+  session: null,
 };
 
 const promptEl = $("prompt");
@@ -19,6 +48,9 @@ const refStripEl = $("refStrip");
 const statusPill = $("statusPill");
 const resultFigure = $("resultFigure");
 const emptyState = $("emptyState");
+const loadingState = $("loadingState");
+const loadingText = $("loadingText");
+const previewPanel = $("previewPanel");
 const resultImage = $("resultImage");
 const resultTitle = $("resultTitle");
 const resultMeta = $("resultMeta");
@@ -40,6 +72,16 @@ const formatEl = $("format");
 const widthEl = $("width");
 const heightEl = $("height");
 const modelEl = $("model");
+const presetListEl = $("presetList");
+const sessionOverlay = $("sessionOverlay");
+const sessionForm = $("sessionForm");
+const baseUrlInput = $("baseUrlInput");
+const apiKeyInput = $("apiKeyInput");
+const sessionError = $("sessionError");
+const settingsBtn = $("settingsBtn");
+const logoutBtn = $("logoutBtn");
+
+let loadingTimer = null;
 
 function setStatus(text, tone = "neutral") {
   statusPill.textContent = text;
@@ -56,10 +98,95 @@ function clearError() {
   errorBox.classList.add("hidden");
 }
 
+function showSessionError(message) {
+  sessionError.textContent = message;
+  sessionError.classList.remove("hidden");
+}
+
+function clearSessionError() {
+  sessionError.textContent = "";
+  sessionError.classList.add("hidden");
+}
+
 function getMimeTypeFromFormat(format) {
   if (format === "jpeg") return "image/jpeg";
   if (format === "webp") return "image/webp";
   return "image/png";
+}
+
+function formatExpiry(timestamp) {
+  if (!timestamp) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(timestamp));
+}
+
+function setSessionUi(session) {
+  state.session = session?.authenticated ? session : null;
+  sessionOverlay.classList.toggle("hidden", Boolean(state.session));
+  settingsBtn.classList.toggle("hidden", !state.session);
+  logoutBtn.classList.toggle("hidden", !state.session);
+
+  if (state.session) {
+    baseUrlInput.value = state.session.baseUrl || "";
+    setStatus(`已登录 · ${formatExpiry(state.session.expiresAt)} 到期`, "good");
+  } else {
+    setStatus("需要配置", "bad");
+  }
+}
+
+async function loadSession() {
+  try {
+    const response = await fetch("/api/session");
+    const data = await response.json();
+    if (!data.ok) throw new Error("bad session response");
+    setSessionUi(data.session);
+  } catch {
+    setSessionUi(null);
+  }
+}
+
+async function saveSession(event) {
+  event.preventDefault();
+  clearSessionError();
+
+  const baseUrl = baseUrlInput.value.trim();
+  const apiKey = apiKeyInput.value.trim();
+  if (!baseUrl || !apiKey) {
+    showSessionError("请填写网关地址和 API Key。");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        OPENAI_BASE_URL: baseUrl,
+        OPENAI_API_KEY: apiKey,
+      }),
+    });
+    const data = await response.json();
+    if (!data.ok) throw new Error(data.error || "保存失败");
+
+    apiKeyInput.value = "";
+    setSessionUi({
+      authenticated: true,
+      baseUrl: data.session.baseUrl,
+      expiresAt: data.session.expiresAt,
+    });
+    setStatus("已登录", "good");
+  } catch (error) {
+    showSessionError(error.message || "配置保存失败。");
+  }
+}
+
+async function logoutSession() {
+  await fetch("/api/session", { method: "DELETE" });
+  setSessionUi(null);
 }
 
 function revokeRefUrls() {
@@ -186,7 +313,6 @@ async function loadConfig() {
     const data = await response.json();
     if (!data.ok) throw new Error("bad config response");
     modelEl.value = data.config?.model || "gpt-image-2";
-    setStatus(data.hasAuth ? "已就绪" : "缺少密钥", data.hasAuth ? "good" : "bad");
   } catch {
     setStatus("离线", "bad");
   }
@@ -295,6 +421,31 @@ function clearEditSource() {
 
 function syncResultMode() {
   continueEditBtn.classList.toggle("hidden", !state.currentResult);
+}
+
+function setGenerating(isGenerating, editMode = false) {
+  generateBtn.disabled = isGenerating;
+  generateBtn.classList.toggle("is-loading", isGenerating);
+  previewPanel.classList.toggle("is-generating", isGenerating);
+  loadingState.classList.toggle("hidden", !isGenerating);
+
+  if (isGenerating) {
+    emptyState.classList.add("hidden");
+    resultFigure.classList.add("hidden");
+    const steps = editMode
+      ? ["正在读取当前结果", "正在融合修改意图", "正在生成新版本"]
+      : ["正在理解提示词", "正在组织画面", "正在渲染结果"];
+    let index = 0;
+    loadingText.textContent = steps[index];
+    loadingTimer = window.setInterval(() => {
+      index = (index + 1) % steps.length;
+      loadingText.textContent = steps[index];
+    }, 1800);
+  } else {
+    window.clearInterval(loadingTimer);
+    loadingTimer = null;
+    loadingState.classList.add("hidden");
+  }
 }
 
 function displayResult({ dataUrl, title, metaText, width, height, format }) {
@@ -412,6 +563,11 @@ function setDownloadSource(format, imageBase64, imageUrl) {
 async function generateImage() {
   clearError();
 
+  if (!state.session) {
+    setSessionUi(null);
+    return;
+  }
+
   const prompt = promptEl.value.trim();
   if (!prompt) {
     showError("请输入提示词。");
@@ -445,7 +601,7 @@ async function generateImage() {
     formData.append("reference_images", file, file.name);
   }
 
-  generateBtn.disabled = true;
+  setGenerating(true, shouldEditFromCurrent);
   setStatus(shouldEditFromCurrent ? "修改中" : "生成中");
 
   try {
@@ -459,8 +615,6 @@ async function generateImage() {
     const dataUrl = currentResultToDataUrl(format, data.imageBase64, data.imageUrl);
     setDownloadSource(format, data.imageBase64, data.imageUrl);
 
-    const previousEditMode = shouldEditFromCurrent;
-
     displayResult({
       dataUrl,
       title: "生成完成",
@@ -470,7 +624,7 @@ async function generateImage() {
       format,
     });
 
-    if (previousEditMode && state.currentResult) {
+    if (shouldEditFromCurrent && state.currentResult) {
       setEditSource(state.currentResult);
     } else {
       clearEditSource();
@@ -493,8 +647,30 @@ async function generateImage() {
   } catch (error) {
     showError(error.message || "生成失败。");
     setStatus("失败", "bad");
+    if (state.currentResult) {
+      resultFigure.classList.remove("hidden");
+    } else {
+      emptyState.classList.remove("hidden");
+    }
   } finally {
-    generateBtn.disabled = false;
+    setGenerating(false);
+  }
+}
+
+function renderPresets() {
+  presetListEl.innerHTML = "";
+  for (const preset of ACADEMIC_PRESETS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "preset-button";
+    button.textContent = preset.name;
+    button.addEventListener("click", () => {
+      const current = promptEl.value.trim();
+      promptEl.value = current ? `${current}\n\n${preset.prompt}` : preset.prompt;
+      promptEl.focus();
+      setStatus(`已加入：${preset.name}`, "good");
+    });
+    presetListEl.appendChild(button);
   }
 }
 
@@ -541,6 +717,13 @@ cancelEditSourceBtn.addEventListener("click", () => {
   clearEditSource();
   setStatus("已取消继续修改", "good");
 });
+
+settingsBtn.addEventListener("click", () => {
+  sessionOverlay.classList.remove("hidden");
+});
+
+logoutBtn.addEventListener("click", logoutSession);
+sessionForm.addEventListener("submit", saveSession);
 
 pastePanel.addEventListener("click", () => {
   pastePanel.focus();
@@ -597,7 +780,9 @@ sizePresetEl.addEventListener("change", syncSizeFields);
 generateBtn.addEventListener("click", generateImage);
 
 syncSizeFields();
+renderPresets();
 loadConfig();
+loadSession();
 refreshHistory().catch(() => {
   setStatus("历史不可用", "bad");
 });

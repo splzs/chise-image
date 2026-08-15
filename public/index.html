@@ -14,22 +14,33 @@
           <span class="brand-mark" aria-hidden="true"></span>
           <div class="brand-copy">
             <h1>起势生图</h1>
-            <p>参考图、提示词、多轮修改</p>
+            <p>学术图像、参考图、多轮修改</p>
           </div>
         </div>
-        <div class="status-pill" id="statusPill">检查中</div>
+        <div class="top-actions">
+          <button id="settingsBtn" class="text-button hidden" type="button">配置</button>
+          <button id="logoutBtn" class="text-button hidden" type="button">退出</button>
+          <div class="status-pill" id="statusPill">检查中</div>
+        </div>
       </header>
 
-      <main class="layout">
+      <main class="layout" id="appLayout" aria-live="polite">
         <section class="panel composer-panel">
           <label class="prompt-field" for="prompt">
             <span class="field-label">提示词</span>
             <textarea
               id="prompt"
               rows="7"
-              placeholder="描述你想生成或修改的画面"
+              placeholder="描述你想生成或修改的学术图像"
             ></textarea>
           </label>
+
+          <section class="preset-panel" aria-label="学术风格">
+            <div class="section-head">
+              <span class="field-label">常用学术风格</span>
+            </div>
+            <div id="presetList" class="preset-list"></div>
+          </section>
 
           <section class="reference-panel" aria-label="参考图">
             <div class="section-head">
@@ -51,7 +62,7 @@
               tabindex="0"
               aria-label="粘贴参考图"
             >
-              点击这里后按 Ctrl+V，或直接拖入图片
+              点击后按 Ctrl+V，或直接拖入图片
             </div>
 
             <div id="editSourceBanner" class="edit-banner hidden">
@@ -98,11 +109,14 @@
           <input id="width" type="hidden" value="1024" />
           <input id="height" type="hidden" value="1024" />
 
-          <button id="generateBtn" class="primary-button" type="button">生成图片</button>
+          <button id="generateBtn" class="primary-button" type="button">
+            <span class="button-label">生成图片</span>
+            <span class="button-loader" aria-hidden="true"></span>
+          </button>
         </section>
 
         <section class="content-stack">
-          <section class="panel preview-panel">
+          <section class="panel preview-panel" id="previewPanel">
             <div class="section-head">
               <span class="section-title">结果</span>
               <div class="preview-actions">
@@ -114,6 +128,15 @@
             <div id="emptyState" class="empty-state">
               <div class="empty-art" aria-hidden="true"></div>
               <p>生成结果会显示在这里</p>
+            </div>
+
+            <div id="loadingState" class="loading-state hidden">
+              <div class="loading-orbit" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p id="loadingText">正在组织画面</p>
             </div>
 
             <figure id="resultFigure" class="result-card hidden">
@@ -141,6 +164,43 @@
           </section>
         </section>
       </main>
+    </div>
+
+    <div id="sessionOverlay" class="session-overlay hidden">
+      <form id="sessionForm" class="session-card">
+        <div class="session-head">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h2>配置生图网关</h2>
+            <p>登录后 90 天内自动有效</p>
+          </div>
+        </div>
+
+        <label class="session-field">
+          <span>OPENAI_BASE_URL</span>
+          <input
+            id="baseUrlInput"
+            type="url"
+            autocomplete="url"
+            placeholder="https://lave8.com/v1"
+            required
+          />
+        </label>
+
+        <label class="session-field">
+          <span>OPENAI_API_KEY</span>
+          <input
+            id="apiKeyInput"
+            type="password"
+            autocomplete="current-password"
+            placeholder="sk-..."
+            required
+          />
+        </label>
+
+        <button id="saveSessionBtn" class="primary-button" type="submit">进入起势生图</button>
+        <p id="sessionError" class="session-error hidden"></p>
+      </form>
     </div>
   </body>
 </html>

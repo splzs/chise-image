@@ -6,9 +6,7 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: OPENAI_BASE_URL
-        value: https://lave8.com/v1
       - key: IMAGE_MODEL
         value: gpt-image-2
-      - key: OPENAI_API_KEY
+      - key: SESSION_SECRET
         sync: false
