@@ -27,7 +27,7 @@ http://localhost:3000
 
 第一次进入页面时填写：
 
-- `OPENAI_BASE_URL`，例如 `https://lave8.com/v1`
+- `OPENAI_BASE_URL`
 - `OPENAI_API_KEY`
 
 ## 阿里服务器部署
@@ -58,30 +58,5 @@ SESSION_SECRET="换成一段足够长的随机字符串"
 
 `SESSION_SECRET` 用于加密用户保存 90 天的网关配置。不要频繁更换，否则已有登录会失效。
 
-## 安全说明
 
-- 用户的 API Key 不写入前端代码。
-- 登录后 API Key 存在服务端加密 Cookie 中，并带有 `HttpOnly`。
-- 浏览器生成图片时只请求自己的 `/api/generate`。
-- 建议正式部署必须启用 HTTPS。
 
-## 可选本地配置
-
-你仍然可以保留本地 `config.json` 和 `auth.json` 作为默认配置，但这一版优先使用用户网页登录后的配置。
-
-`config.json`
-
-```json
-{
-  "base_url": "",
-  "image_model": "gpt-image-2"
-}
-```
-
-`auth.json`
-
-```json
-{
-  "OPENAI_API_KEY": "sk-..."
-}
-```
