@@ -276,6 +276,26 @@ function toImageResult(data) {
   };
 }
 
+function normalizeOutputFormat(format) {
+  const value = String(format || "png").trim().toLowerCase();
+  if (value === "svg") return "png";
+  if (value === "jpeg" || value === "jpg") return "jpeg";
+  if (value === "webp") return "webp";
+  return "png";
+}
+
+async function readJsonOrError(response, label) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    const preview = text.replace(/\s+/g, " ").slice(0, 180);
+    throw new Error(
+      `${label} 返回的不是 JSON。请检查 OPENAI_BASE_URL 是否填到 /v1，或网关是否返回了 HTML 错误页。响应片段：${preview}`
+    );
+  }
+}
+
 export async function generateImageFromFormData(formData, { config = {}, auth = {}, session = null, env = process.env } = {}) {
   const apiKey = session?.apiKey || getApiKey(auth, env);
   if (!apiKey) {
@@ -294,11 +314,13 @@ export async function generateImageFromFormData(formData, { config = {}, auth = 
 
   const quality = String(formData.get("quality") || "auto").trim() || "auto";
   const background = String(formData.get("background") || "auto").trim() || "auto";
-  const format = String(formData.get("format") || "png").trim() || "png";
+  const requestedFormat = String(formData.get("format") || "png").trim() || "png";
+  const format = normalizeOutputFormat(requestedFormat);
   const compression = parsePositiveInt(formData.get("compression"), 100);
   const referenceFiles = formData
     .getAll("reference_images")
     .filter((file) => file && typeof file.arrayBuffer === "function" && file.size);
+  const maskFile = formData.get("mask");
 
   if (background === "transparent" && /gpt-img2|gpt-image-2/i.test(imageModel)) {
     return {
@@ -322,6 +344,9 @@ export async function generateImageFromFormData(formData, { config = {}, auth = 
     outbound.set("output_compression", String(compression));
     for (const file of referenceFiles) {
       outbound.append("image", file, file.name || "reference.png");
+    }
+    if (maskFile && typeof maskFile.arrayBuffer === "function" && maskFile.size) {
+      outbound.set("mask", maskFile, maskFile.name || "mask.png");
     }
 
     response = await fetch(`${baseUrl}/${endpoint}`, {
@@ -350,7 +375,7 @@ export async function generateImageFromFormData(formData, { config = {}, auth = 
     });
   }
 
-  const data = await response.json();
+  const data = await readJsonOrError(response, `${baseUrl}/${endpoint}`);
   if (!response.ok) {
     return {
       status: response.status,
@@ -372,15 +397,17 @@ export async function generateImageFromFormData(formData, { config = {}, auth = 
 
   return {
     status: 200,
-    body: {
-      ok: true,
-      imageBase64: image.imageBase64,
-      imageUrl: image.imageUrl,
-      revisedPrompt: image.revisedPrompt,
-      width: image.width,
-      height: image.height,
-      model: imageModel,
-      endpoint,
-    },
-  };
-}
+      body: {
+        ok: true,
+        imageBase64: image.imageBase64,
+        imageUrl: image.imageUrl,
+        revisedPrompt: image.revisedPrompt,
+        width: image.width,
+        height: image.height,
+        model: imageModel,
+        endpoint,
+        format: requestedFormat,
+        outputFormat: format,
+      },
+    };
+  }

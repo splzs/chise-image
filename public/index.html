@@ -14,7 +14,6 @@
           <span class="brand-mark" aria-hidden="true"></span>
           <div class="brand-copy">
             <h1>起势生图</h1>
-            <p>学术图像、参考图、多轮修改</p>
           </div>
         </div>
         <div class="top-actions">
@@ -31,13 +30,14 @@
             <textarea
               id="prompt"
               rows="7"
-              placeholder="描述你想生成或修改的学术图像"
+              placeholder="描绘你想象中的图片"
             ></textarea>
           </label>
 
-          <section class="preset-panel" aria-label="学术风格">
+          <section class="preset-panel prompt-bank" aria-label="常用提示词">
             <div class="section-head">
-              <span class="field-label">常用学术风格</span>
+              <span class="field-label">常用提示</span>
+              <button id="addPresetBtn" class="text-button" type="button">添加</button>
             </div>
             <div id="presetList" class="preset-list"></div>
           </section>
@@ -74,16 +74,25 @@
           </section>
 
           <section class="settings-grid" aria-label="生成设置">
-            <label class="compact-field">
+            <div class="compact-field">
               <span class="field-label">尺寸</span>
-              <select id="sizePreset">
-                <option value="1024x1024">1024 × 1024</option>
-                <option value="1536x1024">1536 × 1024</option>
-                <option value="1024x1536">1024 × 1536</option>
-                <option value="1792x1024">1792 × 1024</option>
-                <option value="1024x1792">1024 × 1792</option>
-              </select>
-            </label>
+              <div class="size-picker">
+                <button
+                  id="sizePickerButton"
+                  class="picker-button"
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                >
+                  <span class="picker-copy">
+                    <strong id="sizePickerLabel">1024×1024</strong>
+                    <small id="sizePickerHint">1:1</small>
+                  </span>
+                  <span class="picker-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div id="sizePickerMenu" class="picker-menu hidden" role="listbox"></div>
+              </div>
+            </div>
 
             <label class="compact-field">
               <span class="field-label">质量</span>
@@ -101,16 +110,26 @@
                 <option value="png">PNG</option>
                 <option value="webp">WEBP</option>
                 <option value="jpeg">JPEG</option>
+                <option value="svg">SVG</option>
               </select>
             </label>
+
+            <div class="compact-field toggle-field">
+              <span class="field-label">抠图</span>
+              <button id="cutoutMode" class="mode-chip" type="button" aria-pressed="false">
+                <span class="mode-chip-mark" aria-hidden="true"></span>
+                <span>透明</span>
+              </button>
+            </div>
           </section>
 
+          <input id="sizePreset" type="hidden" value="1024x1024" />
           <input id="model" type="hidden" value="gpt-image-2" />
           <input id="width" type="hidden" value="1024" />
           <input id="height" type="hidden" value="1024" />
 
           <button id="generateBtn" class="primary-button" type="button">
-            <span class="button-label">生成图片</span>
+            <span id="generateBtnLabel" class="button-label">生成图片</span>
             <span class="button-loader" aria-hidden="true"></span>
           </button>
         </section>
@@ -119,10 +138,11 @@
           <section class="panel preview-panel" id="previewPanel">
             <div class="section-head">
               <span class="section-title">结果</span>
-              <div class="preview-actions">
-                <button id="continueEditBtn" class="text-button hidden" type="button">继续修改</button>
-                <button id="downloadBtn" class="text-button hidden" type="button">下载</button>
-              </div>
+            <div class="preview-actions">
+              <button id="continueEditBtn" class="text-button hidden" type="button">继续修改</button>
+              <button id="retouchBtn" class="text-button hidden" type="button">局部重绘</button>
+              <button id="downloadBtn" class="text-button hidden" type="button">下载</button>
+            </div>
             </div>
 
             <div id="emptyState" class="empty-state">
@@ -153,17 +173,61 @@
           <section class="panel history-panel">
             <div class="section-head">
               <span class="section-title">历史</span>
-              <button id="clearHistoryBtn" class="text-button hidden" type="button">清空</button>
+              <div class="history-actions">
+                <button id="toggleHistoryBtn" class="text-button" type="button">收起</button>
+                <button id="exportHistoryBtn" class="text-button hidden" type="button">导出</button>
+                <button id="importHistoryBtn" class="text-button" type="button">导入</button>
+                <button id="clearHistoryBtn" class="text-button hidden" type="button">清空</button>
+              </div>
             </div>
 
+            <input id="historyImportInput" type="file" accept="application/json,.json" hidden />
+
             <div id="historyEmpty" class="history-empty">
-              <p>会保存最近生成结果和提示词</p>
+              <p>这里会保存最近生成的结果和提示词。</p>
             </div>
 
             <div id="historyList" class="history-list"></div>
           </section>
         </section>
       </main>
+    </div>
+
+    <div id="retouchOverlay" class="retouch-overlay hidden" aria-hidden="true">
+      <div class="retouch-card">
+        <div class="section-head">
+          <span class="section-title">局部重绘</span>
+          <button id="retouchCloseBtn" class="text-button" type="button">关闭</button>
+        </div>
+
+        <div class="retouch-stage">
+          <div class="retouch-canvas-stack">
+            <canvas id="retouchCanvas"></canvas>
+            <canvas id="retouchOverlayCanvas"></canvas>
+          </div>
+        </div>
+
+        <label class="retouch-prompt-field" for="retouchPrompt">
+          <span class="field-label">新的提示词</span>
+          <textarea
+            id="retouchPrompt"
+            rows="3"
+            placeholder="输入这次需要怎么改"
+          ></textarea>
+        </label>
+
+        <div class="retouch-toolbar">
+          <label class="retouch-slider">
+            <span>画笔</span>
+            <input id="retouchBrushRange" type="range" min="8" max="120" value="36" />
+          </label>
+          <button id="retouchClearBtn" class="soft-button" type="button">清空</button>
+          <button id="retouchCancelBtn" class="soft-button" type="button">取消</button>
+          <button id="retouchApplyBtn" class="primary-button" type="button">应用修改</button>
+        </div>
+
+        <p id="retouchError" class="retouch-error hidden" role="alert"></p>
+      </div>
     </div>
 
     <div id="sessionOverlay" class="session-overlay hidden">
@@ -202,5 +266,13 @@
         <p id="sessionError" class="session-error hidden"></p>
       </form>
     </div>
+
+    <footer class="page-footer">
+      <img class="footer-logo" src="/qishi-tech-logo.png" alt="起势科技" />
+      <div class="footer-copy">
+        <span>所有权归起势科技所有</span>
+        <small>Qishi Technology</small>
+      </div>
+    </footer>
   </body>
 </html>
