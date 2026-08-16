@@ -611,22 +611,76 @@ async function removeGreenBackground(dataUrl) {
 
   const imageData = ctx.getImageData(0, 0, width, height);
   const pixels = imageData.data;
-  const maxDistance = 180;
-  const minDistance = 30;
+  const alphaMap = new Float32Array(width * height);
+  const clamp01 = (value) => Math.max(0, Math.min(1, value));
+  const smoothstep = (edge0, edge1, value) => {
+    const t = clamp01((value - edge0) / (edge1 - edge0));
+    return t * t * (3 - 2 * t);
+  };
 
   for (let index = 0; index < pixels.length; index += 4) {
     const r = pixels[index];
     const g = pixels[index + 1];
     const b = pixels[index + 2];
-    const a = pixels[index + 3];
-    const distance = Math.sqrt((r * r) + ((g - 255) * (g - 255)) + (b * b));
-    const alpha = Math.max(0, Math.min(1, (distance - minDistance) / (maxDistance - minDistance)));
-    const spill = Math.min(1, Math.max(0, (g - Math.max(r, b)) / 255));
+    const pixelIndex = index / 4;
+    const strongestNonGreen = Math.max(r, b);
+    const greenDominance = g - strongestNonGreen;
+    const greenRatio = g / (strongestNonGreen + 1);
+    const pureGreenDistance = Math.sqrt((r * r) + ((g - 255) * (g - 255)) + (b * b));
+    const pureGreenScore = 1 - smoothstep(36, 175, pureGreenDistance);
+    const dominanceScore =
+      smoothstep(10, 96, greenDominance) *
+      smoothstep(34, 120, g) *
+      smoothstep(1.08, 1.55, greenRatio);
+    const screenScore = Math.max(pureGreenScore, dominanceScore);
 
-    pixels[index] = Math.round(r * (1 - spill * 0.1));
-    pixels[index + 1] = Math.round(g * alpha);
-    pixels[index + 2] = Math.round(b * (1 - spill * 0.1));
-    pixels[index + 3] = Math.round(a * alpha);
+    let alpha = 1 - screenScore;
+    if (pureGreenDistance < 72 || (greenDominance > 42 && g > 58 && greenRatio > 1.22)) {
+      alpha = 0;
+    } else if (alpha < 0.08) {
+      alpha = 0;
+    } else if (alpha > 0.96) {
+      alpha = 1;
+    }
+
+    alphaMap[pixelIndex] = alpha;
+  }
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const pixelIndex = index / 4;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    const r = pixels[index];
+    const g = pixels[index + 1];
+    const b = pixels[index + 2];
+    const a = pixels[index + 3];
+    const strongestNonGreen = Math.max(r, b);
+    const greenDominance = g - strongestNonGreen;
+    let alpha = alphaMap[pixelIndex];
+    let edgeTouch = 0;
+
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (!dx && !dy) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        if (alphaMap[(ny * width) + nx] < 0.12) edgeTouch += 1;
+      }
+    }
+
+    if (edgeTouch && greenDominance > 6) {
+      alpha *= greenDominance > 24 ? 0.68 : 0.84;
+    }
+
+    const spillStrength = clamp01((greenDominance - 3) / 72) * (edgeTouch ? 1 : 0.55);
+    const neutralGreen = Math.round((r + b) / 2);
+    const greenTarget = Math.min(g, Math.max(strongestNonGreen, neutralGreen));
+
+    pixels[index] = r;
+    pixels[index + 1] = Math.round(g + ((greenTarget - g) * spillStrength));
+    pixels[index + 2] = b;
+    pixels[index + 3] = Math.round(a * clamp01(alpha));
   }
 
   ctx.putImageData(imageData, 0, 0);
@@ -842,7 +896,7 @@ function buildEffectivePrompt(input) {
   const qualityLabel = qualityEl.options[qualityEl.selectedIndex]?.textContent?.trim() || "自动";
   const formatLabel = formatEl.options[formatEl.selectedIndex]?.textContent?.trim() || "PNG";
   const cutoutSuffix = isCutoutModeEnabled()
-    ? " 生成时请把主体放在纯 #00FF00 单色背景上，不要棋盘格、透明示意背景、灰白方格、阴影、渐变、纹理或反光；主体边缘清晰完整，便于后续去背景并导出透明 PNG。"
+    ? " 生成时请把主体放在纯 #00FF00 单色背景上，不要棋盘格、透明示意背景、灰白方格、阴影、渐变、纹理或反光；主体边缘清晰完整，不要绿色描边、绿光、绿边或绿色溢色，便于后续去背景并导出透明 PNG。"
     : "";
 
   if (trimmed) return `${trimmed}${cutoutSuffix}`;
